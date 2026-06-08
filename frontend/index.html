@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ONPE 2026 · Análisis Electoral</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<header>
+  <div class="hdr-left">
+    <div class="flag"><span></span><span></span><span></span></div>
+    <div>
+      <h1>Segunda Vuelta 2026</h1>
+      <p>Extrapolación bottom-up · Solo unidades nivel 4</p>
+    </div>
+  </div>
+  <div id="status" class="status">Cargando CSV…</div>
+</header>
+
+<!-- ══════════════ RESULTADO FINAL ══════════════ -->
+<section id="result" class="result hidden">
+
+  <div class="result-grid">
+
+    <div class="cand-card" id="card-a">
+      <div class="cand-name" id="name-a"></div>
+      <div class="cand-pct"  id="pct-a"></div>
+      <div class="cand-extrap">
+        <span class="lbl">Votos proyectados</span>
+        <span class="val" id="extrap-a"></span>
+      </div>
+      <div class="cand-ic" id="ic-a"></div>
+    </div>
+
+    <div class="center-col">
+      <div class="big-bar-wrap">
+        <div class="big-bar-a" id="bar-a"></div>
+        <div class="big-bar-b" id="bar-b"></div>
+      </div>
+      <div class="big-bar-labels">
+        <span id="blbl-a"></span><span id="blbl-b"></span>
+      </div>
+      <div class="coverage">
+        <div class="cov-ring">
+          <svg viewBox="0 0 80 80">
+            <circle cx="40" cy="40" r="32" class="ring-bg"/>
+            <circle cx="40" cy="40" r="32" class="ring-fg" id="ring-fg"/>
+          </svg>
+          <div class="cov-label">
+            <div id="cov-pct"></div>
+            <div class="cov-sub">actas</div>
+          </div>
+        </div>
+        <div class="cov-text">
+          <div id="cov-acts"></div>
+          <div id="cov-districts"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cand-card" id="card-b">
+      <div class="cand-name" id="name-b"></div>
+      <div class="cand-pct"  id="pct-b"></div>
+      <div class="cand-extrap">
+        <span class="lbl">Votos proyectados</span>
+        <span class="val" id="extrap-b"></span>
+      </div>
+      <div class="cand-ic" id="ic-b"></div>
+    </div>
+
+  </div>
+
+  <!-- Fórmula / metodología -->
+  <div class="method-box">
+    <strong>Metodología:</strong>
+    Por cada unidad geográfica profundidad 4 (distrito/ciudad):
+    <em>p̂ᵢ = votos_A / total_válidos</em>,
+    <em>N̂ᵢ = total_válidos × (totalActas / contabilizadas)</em>,
+    <em>MoEᵢ = 1.96 × √(p̂ᵢ(1−p̂ᵢ)/nᵢ) × √((Nᵢ−nᵢ)/(Nᵢ−1))</em>
+    donde <em>nᵢ = contabilizadas</em> y <em>Nᵢ = totalActas</em> (corrección finita).
+    Resultado final: SUMPRODUCTO de proyecciones ponderadas por N̂ᵢ.
+    Varianza compuesta: <em>σ²_total = Σ (MoEᵢ/1.96 × N̂ᵢ)²</em>
+  </div>
+</section>
+
+<!-- ══════════════ TABLA DE DISTRITOS ══════════════ -->
+<section id="table-section" class="hidden">
+  <div class="tbl-controls">
+    <input id="search" type="search" placeholder="Buscar distrito…"/>
+    <label>Ordenar:
+      <select id="sort">
+        <option value="moe-desc">Mayor MoE</option>
+        <option value="moe-asc">Menor MoE</option>
+        <option value="pct-a-desc">Mayor % Cand A</option>
+        <option value="pct-b-desc">Mayor % Cand B</option>
+        <option value="extrap-desc">Mayor N̂ extrapolado</option>
+        <option value="cov-asc">Menor cobertura</option>
+        <option value="alpha">Alfabético</option>
+      </select>
+    </label>
+    <span id="tbl-count" class="tbl-count"></span>
+  </div>
+
+  <div class="tbl-wrap">
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>Ubicación</th>
+          <th title="actas contabilizadas / totalActas">n / N (actas)</th>
+          <th title="Cobertura">Cob %</th>
+          <th title="Votos válidos contados">Válidos</th>
+          <th id="th-pa">p̂ₐ actual</th>
+          <th id="th-pb">p̂ᵦ actual</th>
+          <th title="Votos válidos proyectados al 100%">N̂ extrap</th>
+          <th title="Margen de error al 95% sobre pˆ">MoE ±</th>
+          <th title="IC 95% del % candidato A">IC 95% (A)</th>
+          <th>Resultado</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div id="tbl-empty" class="tbl-empty hidden">Sin resultados.</div>
+  </div>
+</section>
+
+<footer>
+  Datos: ONPE · Proyección estadística sin carácter oficial ·
+  <span id="footer-ts"></span>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

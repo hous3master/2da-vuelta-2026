@@ -185,6 +185,17 @@ tbody tr:hover { background:var(--bg3); }
 .cov-bar  { height:100%; border-radius:3px; background:var(--blue); }
 .tbl-empty { text-align:center; padding:40px; color:var(--muted); }
 
+/* Imputed rows */
+.row-imputed { opacity:.82; }
+.row-imputed td.loc { color:var(--muted); }
+.imp-badge {
+  display:inline-block; margin-left:5px;
+  font-size:.62rem; font-weight:700; padding:1px 5px;
+  border-radius:99px; border:1px solid #f59e0b88;
+  background:#f59e0b18; color:#f59e0b;
+  vertical-align:middle; cursor:help;
+}
+
 /* ── FOOTER ──────────────────────────────────────────── */
 footer {
   text-align:center; font-size:.7rem; color:var(--dim);

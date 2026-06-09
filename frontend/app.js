@@ -62,21 +62,33 @@ function build(raw) {
   const lines   = raw.split('\n').filter(l => l.trim());
   const headers = splitLine(lines[0]).map(h => h.trim());
 
-  // 1. Most recent row per (geo-key, candidato)
+  // 1a. Most recent row per (depth-4 geo-key, candidato)
   const latest = new Map();
+  // 1b. Most recent row per (depth-1/2/3 geo-key, candidato) for imputation
+  const latestParent = new Map();
+
   for (let i = 1; i < lines.length; i++) {
     const vals = splitLine(lines[i]);
     if (vals.length < headers.length) continue;
     const row  = {};
     headers.forEach((h, j) => row[h] = (vals[j] ?? '').trim());
-    // depth-4: all three of p2, p3, p4 are non-empty
-    if (!row.PROFUNDIDAD_4) continue;
-    const key = `${row.PROFUNDIDAD_1}|${row.PROFUNDIDAD_2}|${row.PROFUNDIDAD_3}|${row.PROFUNDIDAD_4}|${row.nombreCandidato}`;
-    const prev = latest.get(key);
-    if (!prev || row.executionTs > prev.executionTs) latest.set(key, row);
+
+    if (row.PROFUNDIDAD_4) {
+      // depth-4
+      const key = `${row.PROFUNDIDAD_1}|${row.PROFUNDIDAD_2}|${row.PROFUNDIDAD_3}|${row.PROFUNDIDAD_4}|${row.nombreCandidato}`;
+      const prev = latest.get(key);
+      if (!prev || row.executionTs > prev.executionTs) latest.set(key, row);
+    } else {
+      // depth-1 / 2 / 3  (used as fallback for imputation)
+      const pKey = [row.PROFUNDIDAD_1, row.PROFUNDIDAD_2, row.PROFUNDIDAD_3]
+        .filter(Boolean).join('|');
+      const key = pKey + '|' + row.nombreCandidato;
+      const prev = latestParent.get(key);
+      if (!prev || row.executionTs > prev.executionTs) latestParent.set(key, row);
+    }
   }
 
-  // 2. Group by geographic node
+  // 2. Group depth-4 by geographic node
   const nodes = new Map();
   for (const row of latest.values()) {
     const gk = `${row.PROFUNDIDAD_1}|${row.PROFUNDIDAD_2}|${row.PROFUNDIDAD_3}|${row.PROFUNDIDAD_4}`;
@@ -97,6 +109,26 @@ function build(raw) {
     }
   }
 
+  // 2b. Build parent nodes map: pKey → {n, N, cands{}}
+  const parentNodes = new Map();
+  for (const row of latestParent.values()) {
+    const pKey = [row.PROFUNDIDAD_1, row.PROFUNDIDAD_2, row.PROFUNDIDAD_3]
+      .filter(Boolean).join('|');
+    if (!parentNodes.has(pKey)) {
+      parentNodes.set(pKey, {
+        n: +row.contabilizadas, N: +row.totalActas,
+        ts: row.executionTs, cands: {},
+      });
+    }
+    const pnd = parentNodes.get(pKey);
+    pnd.cands[row.nombreCandidato] = +row.totalVotosValidos;
+    if (row.executionTs > pnd.ts) {
+      pnd.ts = row.executionTs;
+      pnd.n  = +row.contabilizadas;
+      pnd.N  = +row.totalActas;
+    }
+  }
+
   // 3. Detect candidates (Sánchez = A red, Fujimori = B orange)
   const totals = {};
   for (const nd of nodes.values())
@@ -109,24 +141,74 @@ function build(raw) {
   candA = (sanchez  || sorted[0])?.[0];
   candB = (fujimori || sorted[1])?.[0];
 
-  // 4. Compute per-district statistics
+  // Helper: walk up hierarchy (depth-3 → depth-2 → depth-1) to find parent proportion
+  // Returns { pA, votesPerActa, n } or null
+  function getParentProp(p1, p2, p3) {
+    const keys = [
+      [p1, p2, p3].filter(Boolean).join('|'),  // depth-3 parent
+      [p1, p2].filter(Boolean).join('|'),       // depth-2 parent
+      p1,                                        // depth-1 parent
+    ];
+    for (const pKey of keys) {
+      const pnd = parentNodes.get(pKey);
+      if (!pnd) continue;
+      const totalV = Object.values(pnd.cands).reduce((s, v) => s + v, 0);
+      if (totalV === 0 || pnd.n === 0) continue;
+      const pA = (pnd.cands[candA] ?? 0) / totalV;
+      return {
+        pA,
+        votesPerActa: totalV / pnd.n,
+        n: pnd.n,
+        level: pKey.split('|').length,  // 1, 2, or 3
+      };
+    }
+    return null;
+  }
+
+  // 4. Compute per-district statistics (with imputation for missing districts)
   DISTRICTS = [];
   for (const nd of nodes.values()) {
     const totalValid = Object.values(nd.cands).reduce((s, v) => s + v, 0);
-    if (totalValid === 0 || nd.n === 0) continue;
 
+    if (totalValid === 0 || nd.n === 0) {
+      // ── Imputation: use parent-level proportion ──────────────
+      if (nd.N === 0) continue;  // nothing we can do
+      const parent = getParentProp(nd.p1, nd.p2, nd.p3);
+      if (!parent) continue;
+
+      const pA   = parent.pA;
+      const pB   = 1 - pA;
+      // Estimate projected vote count using parent's votes-per-acta ratio
+      const Nhat = nd.N * parent.votesPerActa;
+      // SE uses parent's n — same uncertainty as parent estimate (we have no local data)
+      const SE   = parent.n > 1 ? Math.sqrt(pA * (1 - pA) / parent.n) : 0;
+      const MoE  = Z * SE;
+
+      DISTRICTS.push({
+        p1: nd.p1, p2: nd.p2, p3: nd.p3, p4: nd.p4,
+        ts: nd.ts, n: 0, N: nd.N,
+        cov: 0,
+        totalValid: 0, vA: 0, vB: 0, pA, pB,
+        Nhat, SE, MoE,
+        SE_votes: SE * Nhat,
+        ciLo: Math.max(0, pA - MoE),
+        ciHi: Math.min(1, pA + MoE),
+        imputed: true,
+        imputedLevel: parent.level,  // which depth the fallback came from
+      });
+      continue;
+    }
+
+    // ── Normal district with real data ───────────────────────
     const vA = nd.cands[candA] ?? 0;
     const vB = nd.cands[candB] ?? 0;
     const pA = vA / totalValid;
     const pB = vB / totalValid;
 
-    // Projection
     const factor = nd.N > 0 ? nd.N / nd.n : 1;
     const Nhat   = totalValid * factor;
 
-    // SE without FPC (conservative for non-random reporting order)
-    // n unit = actas contabilizadas (ballot boxes)
-    const SE = nd.n > 1 ? Math.sqrt(pA * (1 - pA) / nd.n) : 0;
+    const SE  = nd.n > 1 ? Math.sqrt(pA * (1 - pA) / nd.n) : 0;
     const MoE = Z * SE;
 
     DISTRICTS.push({
@@ -138,6 +220,7 @@ function build(raw) {
       SE_votes: SE * Nhat,
       ciLo: Math.max(0, pA - MoE),
       ciHi: Math.min(1, pA + MoE),
+      imputed: false,
     });
   }
 }
@@ -463,10 +546,14 @@ function renderTable() {
 
   for (const d of rows) {
     const moeClass = d.MoE * 100 <= 1 ? 'moe-low' : d.MoE * 100 <= 3 ? 'moe-med' : 'moe-high';
+    const imputedBadge = d.imputed
+      ? ` <span class="imp-badge" title="Sin actas contadas. Distribución imputada desde nivel ${d.imputedLevel}">↑L${d.imputedLevel}</span>`
+      : '';
     const tr = document.createElement('tr');
+    if (d.imputed) tr.classList.add('row-imputed');
     tr.innerHTML = `
-      <td class="loc">${d.p4}<small>${[d.p2, d.p3].filter(Boolean).join(' › ')}</small></td>
-      <td class="num">${fmt(d.n)} / ${fmt(d.N)}</td>
+      <td class="loc">${d.p4}${imputedBadge}<small>${[d.p2, d.p3].filter(Boolean).join(' › ')}</small></td>
+      <td class="num">${d.imputed ? `<span style="color:var(--muted)">0 / ${fmt(d.N)}</span>` : `${fmt(d.n)} / ${fmt(d.N)}`}</td>
       <td>
         <div style="font-size:.72rem;color:var(--muted)">${(d.cov*100).toFixed(1)}%</div>
         <div class="cov-bar-wrap"><div class="cov-bar" style="width:${Math.min(100,d.cov*100)}%"></div></div>

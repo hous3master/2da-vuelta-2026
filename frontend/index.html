@@ -93,10 +93,13 @@
   <div class="method-box">
     <strong>Metodología del MoE:</strong>
     Unidad de muestreo = acta.
-    <em>SE = √(p̂(1−p̂)/n_actas)</em> sin FPC (conservador: las actas no contadas pueden ser sistemáticamente distintas).
+    <em>SE = √(p̂(1−p̂)/n_actas)</em> sin FPC (conservador).
     <em>MoE = 1.96 × SE</em>.
-    Resultado: SUMPRODUCTO ponderado por <em>N̂ᵢ</em>; varianza compuesta: <em>σ²=Σ(SEᵢ×N̂ᵢ)²</em>.
-    MoE mostrado = max(compuesto bottom-up, cluster cross-distrito).
+    SUMPRODUCTO ponderado por <em>N̂ᵢ</em>; varianza compuesta: <em>σ²=Σ(SEᵢ×N̂ᵢ)²</em>.
+    MoE = max(compuesto bottom-up, cluster cross-distrito).
+    <strong>Imputación <span class="imp-badge">↑L</span>:</strong>
+    Distritos sin actas contadas heredan la distribución del nivel geográfico superior
+    (provincia → departamento → nacional). El MoE usa el <em>n</em> del nivel de respaldo.
   </div>
 </section>
 

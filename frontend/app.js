@@ -428,52 +428,53 @@ function buildDistChart(pA, pB, SE) {
   if (distChartInst) distChartInst.destroy();
   if (SE === 0) return;
 
-  const nPts  = 300;
-  const range = Math.max(SE * 6, Math.abs(pA - pB) + SE * 4);
+  const nPts   = 300;
+  const range  = Math.max(SE * 7, Math.abs(pA - pB) + SE * 5);
   const center = (pA + pB) / 2;
-  const xMin  = center - range / 2;
-  const xMax  = center + range / 2;
+  const xMin   = Math.max(0,   center - range / 2);
+  const xMax   = Math.min(1,   center + range / 2);
 
   const xs = Array.from({ length: nPts }, (_, i) => xMin + i * (xMax - xMin) / (nPts - 1));
 
-  const yA = xs.map(x => normalPdf(x, pA, SE));
-  const yB = xs.map(x => normalPdf(x, pB, SE));
-  // overlap = min of the two curves
-  const yOv = xs.map((x, i) => Math.min(yA[i], yB[i]));
-
-  const labels = xs.map(x => (x * 100).toFixed(2));
+  // Use {x, y} objects so Chart.js uses a linear x-axis (values in %, not indices)
+  const mkPt  = (x, y) => ({ x: +(x * 100).toFixed(4), y });
+  const dataA = xs.map(x => mkPt(x, normalPdf(x, pA, SE)));
+  const dataB = xs.map(x => mkPt(x, normalPdf(x, pB, SE)));
+  const dataOv = xs.map((x, i) => mkPt(x, Math.min(dataA[i].y, dataB[i].y)));
 
   distChartInst = new Chart(qs('#dist-chart'), {
-    type: 'line',
+    type: 'scatter',
     data: {
-      labels,
       datasets: [
         {
           label: candA.split(' ')[0],
-          data: yA,
+          data: dataA,
           borderColor: '#e74c3c',
           backgroundColor: 'rgba(231,76,60,0.15)',
           fill: true,
+          showLine: true,
           tension: 0.4,
           pointRadius: 0,
           borderWidth: 2,
         },
         {
           label: candB.split(' ')[0],
-          data: yB,
+          data: dataB,
           borderColor: '#f39c12',
           backgroundColor: 'rgba(243,156,18,0.15)',
           fill: true,
+          showLine: true,
           tension: 0.4,
           pointRadius: 0,
           borderWidth: 2,
         },
         {
           label: 'Solapamiento',
-          data: yOv,
+          data: dataOv,
           borderColor: 'transparent',
           backgroundColor: 'rgba(255,255,255,0.12)',
           fill: true,
+          showLine: true,
           pointRadius: 0,
           borderWidth: 0,
         },
@@ -488,20 +489,21 @@ function buildDistChart(pA, pB, SE) {
         },
         tooltip: {
           callbacks: {
-            title: ctx => ctx[0].label + '%',
+            title: ctx => ctx[0].parsed.x.toFixed(3) + '%',
             label: ctx => ctx.datasetIndex < 2
-              ? ` ${ctx.dataset.label}: densidad ${ctx.raw.toFixed(1)}`
+              ? ` ${ctx.dataset.label}: densidad ${ctx.parsed.y.toFixed(1)}`
               : '',
           },
         },
       },
       scales: {
         x: {
+          type: 'linear',
           grid:  { color: '#2a334760' },
           ticks: {
             color: '#7b8aab',
             maxTicksLimit: 8,
-            callback: v => v + '%',
+            callback: v => v.toFixed(2) + '%',
           },
         },
         y: {
@@ -509,7 +511,6 @@ function buildDistChart(pA, pB, SE) {
           grid:    { display: false },
         },
       },
-      elements: { point: { radius: 0 } },
     },
   });
 }

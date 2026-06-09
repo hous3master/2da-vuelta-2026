@@ -1,28 +1,20 @@
 """
 FASE 2: Scraper progresivo de resultados electorales ONPE 2da Vuelta 2026.
 
-Lee geo_map.json (generado por onpe_geo_mapper.py) y por cada nodo consulta
-totales + participantes, escribiendo cada fila en el CSV al instante.
+Lee geo_map.json y lanza hasta WORKERS peticiones HTTP en paralelo.
+Escribe al CSV con lock y avanza el checkpoint de forma consecutiva segura.
 
 Archivos:
-  geo_map.json                   → mapa estático de geografía (input)
+  geo_map.json                   → mapa estático (input)
   resultados_onpe_progresivo.csv → CSV acumulativo (append)
-  checkpoint.txt                 → índice del último nodo procesado con éxito
-
-Columnas CSV:
-  executionTs, nombreCandidato, PROFUNDIDAD_1..4,
-  contabilizadas, totalActas, totalVotosValidos,
-  porcentajeVotosValidos
+  checkpoint.txt                 → último índice consecutivo exitoso
 """
 
-import json
-import csv
-import time
-import sys
-import os
+import json, csv, time, sys, os, threading
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Fix Windows cp1252 console encoding
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -30,13 +22,14 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stderr = open(sys.stderr.fileno(), mode='w', encoding='utf-8', buffering=1)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
-BASE       = "https://resultadosegundavuelta.onpe.gob.pe/presentacion-backend"
-GEO_FILE   = "geo_map.json"
-CSV_FILE   = "resultados_onpe_progresivo.csv"
-CKPT_FILE  = "checkpoint.txt"
-DELAY      = 0.15   # segundos entre requests
-RETRIES    = 3
-TIMEOUT    = 20
+BASE      = "https://resultadosegundavuelta.onpe.gob.pe/presentacion-backend"
+GEO_FILE  = "geo_map.json"
+CSV_FILE  = "resultados_onpe_progresivo.csv"
+CKPT_FILE = "checkpoint.txt"
+WORKERS   = 10
+DELAY     = 0.10   # pausa entre los 2 endpoints dentro de un mismo hilo
+RETRIES   = 3
+TIMEOUT   = 25
 
 HEADERS = {
     "accept": "*/*",
@@ -50,7 +43,10 @@ HEADERS = {
     "sec-fetch-dest": "empty",
     "sec-fetch-mode": "cors",
     "sec-fetch-site": "same-origin",
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "user-agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    ),
 }
 
 FIELDNAMES = [
@@ -70,7 +66,6 @@ def get_json(url):
                 data = json.loads(resp.read().decode("utf-8"))
                 return data.get("data") if data.get("success") else None
         except (URLError, json.JSONDecodeError) as e:
-            print(f"  [intento {attempt+1}/{RETRIES}] {e}", file=sys.stderr)
             if attempt < RETRIES - 1:
                 time.sleep(2 ** attempt)
     return None
@@ -78,7 +73,7 @@ def get_json(url):
 
 def build_qs(node):
     parts = [
-        f"idEleccion=10",
+        "idEleccion=10",
         f"tipoFiltro={node['tipoFiltro']}",
         f"idAmbitoGeografico={node['idAmbitoGeografico']}",
     ]
@@ -91,21 +86,43 @@ def build_qs(node):
     return "&".join(parts)
 
 
-# ─── CSV helpers ───────────────────────────────────────────────────────────────
-def csv_exists():
-    return os.path.isfile(CSV_FILE) and os.path.getsize(CSV_FILE) > 0
+# ─── Worker (runs in thread pool) ─────────────────────────────────────────────
+def process_node(idx, node):
+    """Fetch totales + participantes for one node. Returns (idx, rows|None)."""
+    ts = datetime.now(timezone.utc).isoformat()
+    qs = build_qs(node)
+
+    totales       = get_json(f"{BASE}/resumen-general/totales?{qs}")
+    time.sleep(DELAY)
+    participantes = get_json(f"{BASE}/resumen-general/participantes?{qs}")
+
+    if totales is None or participantes is None:
+        return idx, None
+
+    contabilizadas = totales.get("contabilizadas", 0)
+    total_actas    = totales.get("totalActas", 0)
+
+    rows = [
+        {
+            "executionTs"           : ts,
+            "nombreCandidato"       : p.get("nombreCandidato", ""),
+            "PROFUNDIDAD_1"         : node["p1"],
+            "PROFUNDIDAD_2"         : node["p2"],
+            "PROFUNDIDAD_3"         : node["p3"],
+            "PROFUNDIDAD_4"         : node["p4"],
+            "contabilizadas"        : contabilizadas,
+            "totalActas"            : total_actas,
+            "totalVotosValidos"     : p.get("totalVotosValidos", 0),
+            "porcentajeVotosValidos": p.get("porcentajeVotosValidos", 0),
+            "tipoFiltro"            : node["tipoFiltro"],
+            "idAmbitoGeografico"    : node["idAmbitoGeografico"],
+        }
+        for p in participantes
+    ]
+    return idx, rows
 
 
-def open_csv():
-    write_header = not csv_exists()
-    f = open(CSV_FILE, "a", newline="", encoding="utf-8")
-    writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-    if write_header:
-        writer.writeheader()
-    return f, writer
-
-
-# ─── Checkpoint ────────────────────────────────────────────────────────────────
+# ─── Checkpoint (thread-safe) ──────────────────────────────────────────────────
 def read_checkpoint():
     if os.path.isfile(CKPT_FILE):
         try:
@@ -120,73 +137,83 @@ def save_checkpoint(idx):
         f.write(str(idx))
 
 
+def advance_checkpoint(completed_set, start_idx, current_ckpt):
+    """Return the highest consecutive index from start_idx that is completed."""
+    i = max(current_ckpt + 1, start_idx)
+    while i in completed_set:
+        i += 1
+    return i - 1
+
+
 # ─── Main ──────────────────────────────────────────────────────────────────────
 def main():
     if not os.path.isfile(GEO_FILE):
-        print(f"ERROR: '{GEO_FILE}' no encontrado. Ejecuta primero onpe_geo_mapper.py", file=sys.stderr)
+        print(f"ERROR: '{GEO_FILE}' no encontrado.", file=sys.stderr)
         sys.exit(1)
 
     with open(GEO_FILE, encoding="utf-8") as f:
         nodes = json.load(f)
 
-    last_ok = read_checkpoint()
+    last_ok   = read_checkpoint()
     start_idx = last_ok + 1
+    total     = len(nodes)
 
-    if start_idx > 0:
-        print(f"Reanudando desde nodo {start_idx} (checkpoint: nodo {last_ok})")
-    else:
-        print(f"Iniciando desde el principio. Total nodos: {len(nodes)}")
+    if start_idx >= total:
+        print("Ya completados todos los nodos según checkpoint.")
+        return
 
-    csv_file, writer = open_csv()
+    print(f"Nodos pendientes: {total - start_idx}/{total}  |  Workers: {WORKERS}")
+
+    write_header = not (os.path.isfile(CSV_FILE) and os.path.getsize(CSV_FILE) > 0)
+    csv_file  = open(CSV_FILE, "a", newline="", encoding="utf-8")
+    writer    = csv.DictWriter(csv_file, fieldnames=FIELDNAMES)
+    if write_header:
+        writer.writeheader()
+
+    csv_lock       = threading.Lock()
+    completed_set  = set()
+    ckpt_lock      = threading.Lock()
+    current_ckpt   = [last_ok]   # mutable container for closure
+    done_count     = [0]
+    ok_count       = [0]
 
     try:
-        for idx in range(start_idx, len(nodes)):
-            node = nodes[idx]
-            qs = build_qs(node)
+        with ThreadPoolExecutor(max_workers=WORKERS) as executor:
+            futures = {
+                executor.submit(process_node, idx, nodes[idx]): idx
+                for idx in range(start_idx, total)
+            }
 
-            ts = datetime.now(timezone.utc).isoformat()
-            label = f"{node['p1']} > {node['p2']} > {node['p3']} > {node['p4']}".rstrip(" > ")
-            print(f"[{idx+1}/{len(nodes)}] {label[:70]}")
+            for future in as_completed(futures):
+                idx, rows = future.result()
+                label = f"{nodes[idx]['p1']} > {nodes[idx].get('p4') or nodes[idx].get('p3') or nodes[idx].get('p2', '')}"
 
-            totales      = get_json(f"{BASE}/resumen-general/totales?{qs}")
-            time.sleep(DELAY)
-            participantes = get_json(f"{BASE}/resumen-general/participantes?{qs}")
-            time.sleep(DELAY)
+                with csv_lock:
+                    done_count[0] += 1
+                    if rows:
+                        for row in rows:
+                            writer.writerow(row)
+                        csv_file.flush()
+                        ok_count[0] += 1
+                        status = "✓"
+                    else:
+                        status = "⚠"
 
-            if totales is None or participantes is None:
-                print(f"  ⚠ Sin datos — se omite nodo {idx}", file=sys.stderr)
-                # No actualizamos checkpoint: al reiniciar reintentará este nodo
-                continue
+                with ckpt_lock:
+                    completed_set.add(idx)
+                    new_ckpt = advance_checkpoint(completed_set, start_idx, current_ckpt[0])
+                    if new_ckpt > current_ckpt[0]:
+                        current_ckpt[0] = new_ckpt
+                        save_checkpoint(new_ckpt)
 
-            contabilizadas   = totales.get("contabilizadas", 0)
-            total_actas      = totales.get("totalActas", 0)
-
-            for part in participantes:
-                row = {
-                    "executionTs"          : ts,
-                    "nombreCandidato"      : part.get("nombreCandidato", ""),
-                    "PROFUNDIDAD_1"        : node["p1"],
-                    "PROFUNDIDAD_2"        : node["p2"],
-                    "PROFUNDIDAD_3"        : node["p3"],
-                    "PROFUNDIDAD_4"        : node["p4"],
-                    "contabilizadas"       : contabilizadas,
-                    "totalActas"           : total_actas,
-                    "totalVotosValidos"    : part.get("totalVotosValidos", 0),
-                    "porcentajeVotosValidos": part.get("porcentajeVotosValidos", 0),
-                    "tipoFiltro"           : node["tipoFiltro"],
-                    "idAmbitoGeografico"   : node["idAmbitoGeografico"],
-                }
-                writer.writerow(row)
-
-            csv_file.flush()            # escribe al disco inmediatamente
-            save_checkpoint(idx)        # marca este nodo como exitoso
+                print(f"[{done_count[0]}/{total-start_idx}] {status} {label[:70]}")
 
     except KeyboardInterrupt:
-        print("\nInterrumpido por el usuario. El checkpoint está guardado.")
+        print("\nInterrumpido. Checkpoint guardado.")
     finally:
         csv_file.close()
 
-    print(f"\n✓ Finalizado. CSV: {CSV_FILE}  |  Checkpoint: nodo {read_checkpoint()}/{len(nodes)-1}")
+    print(f"\nFinalizado. OK={ok_count[0]}  Checkpoint={current_ckpt[0]}/{total-1}")
 
 
 if __name__ == "__main__":

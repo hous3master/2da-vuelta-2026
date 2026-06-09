@@ -12,80 +12,95 @@
   <div class="hdr-left">
     <div class="flag"><span></span><span></span><span></span></div>
     <div>
-      <h1>Segunda Vuelta 2026</h1>
-      <p>Extrapolación bottom-up · Solo unidades nivel 4</p>
+      <h1>Segunda Vuelta 2026 — Proyección estadística</h1>
+      <p>Extrapolación bottom-up · Solo unidades nivel 4 · p = 0.05</p>
     </div>
   </div>
   <div id="status" class="status">Cargando CSV…</div>
 </header>
 
-<!-- ══════════════ RESULTADO FINAL ══════════════ -->
-<section id="result" class="result hidden">
+<!-- ══ KPIs ══════════════════════════════════════════════════ -->
+<section id="kpi-section" class="hidden">
+  <div class="kpi-row">
 
-  <div class="result-grid">
-
-    <div class="cand-card" id="card-a">
-      <div class="cand-name" id="name-a"></div>
-      <div class="cand-pct"  id="pct-a"></div>
-      <div class="cand-extrap">
-        <span class="lbl">Votos proyectados</span>
-        <span class="val" id="extrap-a"></span>
+    <div class="kpi-card kpi-a" id="card-a">
+      <div class="kpi-badge" id="badge-a"></div>
+      <div class="kpi-name" id="name-a"></div>
+      <div class="kpi-pct"  id="pct-a"></div>
+      <div class="kpi-votes">
+        <span class="lbl">Votos proyectados:</span>
+        <span id="extrap-a"></span>
       </div>
-      <div class="cand-ic" id="ic-a"></div>
+      <div class="kpi-ic" id="ic-a"></div>
     </div>
 
-    <div class="center-col">
-      <div class="big-bar-wrap">
-        <div class="big-bar-a" id="bar-a"></div>
-        <div class="big-bar-b" id="bar-b"></div>
-      </div>
-      <div class="big-bar-labels">
-        <span id="blbl-a"></span><span id="blbl-b"></span>
-      </div>
-      <div class="coverage">
-        <div class="cov-ring">
-          <svg viewBox="0 0 80 80">
-            <circle cx="40" cy="40" r="32" class="ring-bg"/>
-            <circle cx="40" cy="40" r="32" class="ring-fg" id="ring-fg"/>
-          </svg>
-          <div class="cov-label">
-            <div id="cov-pct"></div>
-            <div class="cov-sub">actas</div>
-          </div>
-        </div>
-        <div class="cov-text">
-          <div id="cov-acts"></div>
-          <div id="cov-districts"></div>
-        </div>
-      </div>
+    <div class="kpi-mid">
+      <div class="kpi-vs">VS</div>
+      <div class="kpi-margin-label">Ventaja</div>
+      <div class="kpi-margin" id="margin-val"></div>
+      <div class="kpi-margin-ic" id="margin-ic"></div>
+      <div class="kpi-sig" id="sig-badge"></div>
     </div>
 
-    <div class="cand-card" id="card-b">
-      <div class="cand-name" id="name-b"></div>
-      <div class="cand-pct"  id="pct-b"></div>
-      <div class="cand-extrap">
-        <span class="lbl">Votos proyectados</span>
-        <span class="val" id="extrap-b"></span>
+    <div class="kpi-card kpi-b" id="card-b">
+      <div class="kpi-badge" id="badge-b"></div>
+      <div class="kpi-name" id="name-b"></div>
+      <div class="kpi-pct"  id="pct-b"></div>
+      <div class="kpi-votes">
+        <span class="lbl">Votos proyectados:</span>
+        <span id="extrap-b"></span>
       </div>
-      <div class="cand-ic" id="ic-b"></div>
+      <div class="kpi-ic" id="ic-b"></div>
     </div>
 
   </div>
 
-  <!-- Fórmula / metodología -->
-  <div class="method-box">
-    <strong>Metodología:</strong>
-    Por cada unidad geográfica profundidad 4 (distrito/ciudad):
-    <em>p̂ᵢ = votos_A / total_válidos</em>,
-    <em>N̂ᵢ = total_válidos × (totalActas / contabilizadas)</em>,
-    <em>MoEᵢ = 1.96 × √(p̂ᵢ(1−p̂ᵢ)/nᵢ) × √((Nᵢ−nᵢ)/(Nᵢ−1))</em>
-    donde <em>nᵢ = contabilizadas</em> y <em>Nᵢ = totalActas</em> (corrección finita).
-    Resultado final: SUMPRODUCTO de proyecciones ponderadas por N̂ᵢ.
-    Varianza compuesta: <em>σ²_total = Σ (MoEᵢ/1.96 × N̂ᵢ)²</em>
+  <!-- Cobertura -->
+  <div class="coverage-row">
+    <div class="cov-item"><span class="cov-lbl">Distritos</span><span id="cov-districts"></span></div>
+    <div class="cov-item"><span class="cov-lbl">Actas</span><span id="cov-acts"></span></div>
+    <div class="cov-item"><span class="cov-lbl">Cobertura</span><span id="cov-pct"></span></div>
+    <div class="cov-item"><span class="cov-lbl">Actualizado</span><span id="cov-ts"></span></div>
   </div>
 </section>
 
-<!-- ══════════════ TABLA DE DISTRITOS ══════════════ -->
+<!-- ══ CHARTS ════════════════════════════════════════════════ -->
+<section id="charts-section" class="hidden">
+  <div class="charts-row">
+
+    <!-- CI overlap bar -->
+    <div class="chart-box">
+      <div class="chart-title">Intervalos de confianza 95%
+        <span class="chart-sub">Rango plausible del resultado final por candidato</span>
+      </div>
+      <div class="ci-canvas-wrap">
+        <canvas id="ci-chart"></canvas>
+      </div>
+      <div class="chart-note" id="overlap-note"></div>
+    </div>
+
+    <!-- Distribution -->
+    <div class="chart-box">
+      <div class="chart-title">Distribución esperada del resultado
+        <span class="chart-sub">Distribución normal bajo muestreo repetido · Área sombreada = solapamiento</span>
+      </div>
+      <canvas id="dist-chart"></canvas>
+    </div>
+
+  </div>
+
+  <!-- Method note -->
+  <div class="method-box">
+    <strong>Metodología del MoE:</strong>
+    Unidad de muestreo = acta.
+    <em>SE = √(p̂(1−p̂)/n_actas)</em> sin FPC (conservador: las actas no contadas pueden ser sistemáticamente distintas).
+    <em>MoE = 1.96 × SE</em>.
+    Resultado: SUMPRODUCTO ponderado por <em>N̂ᵢ</em>; varianza compuesta: <em>σ²=Σ(SEᵢ×N̂ᵢ)²</em>.
+    MoE mostrado = max(compuesto bottom-up, cluster cross-distrito).
+  </div>
+</section>
+
+<!-- ══ TABLA ══════════════════════════════════════════════════ -->
 <section id="table-section" class="hidden">
   <div class="tbl-controls">
     <input id="search" type="search" placeholder="Buscar distrito…"/>
@@ -93,9 +108,9 @@
       <select id="sort">
         <option value="moe-desc">Mayor MoE</option>
         <option value="moe-asc">Menor MoE</option>
-        <option value="pct-a-desc">Mayor % Cand A</option>
-        <option value="pct-b-desc">Mayor % Cand B</option>
-        <option value="extrap-desc">Mayor N̂ extrapolado</option>
+        <option value="pct-a-desc">Mayor % A</option>
+        <option value="pct-b-desc">Mayor % B</option>
+        <option value="extrap-desc">Mayor N̂ extrap</option>
         <option value="cov-asc">Menor cobertura</option>
         <option value="alpha">Alfabético</option>
       </select>
@@ -104,18 +119,18 @@
   </div>
 
   <div class="tbl-wrap">
-    <table id="tbl">
+    <table>
       <thead>
         <tr>
           <th>Ubicación</th>
-          <th title="actas contabilizadas / totalActas">n / N (actas)</th>
-          <th title="Cobertura">Cob %</th>
-          <th title="Votos válidos contados">Válidos</th>
-          <th id="th-pa">p̂ₐ actual</th>
-          <th id="th-pb">p̂ᵦ actual</th>
-          <th title="Votos válidos proyectados al 100%">N̂ extrap</th>
-          <th title="Margen de error al 95% sobre pˆ">MoE ±</th>
-          <th title="IC 95% del % candidato A">IC 95% (A)</th>
+          <th>n / N (actas)</th>
+          <th>Cob %</th>
+          <th>Válidos</th>
+          <th id="th-pa">p̂ A</th>
+          <th id="th-pb">p̂ B</th>
+          <th>N̂ extrap</th>
+          <th>MoE ±</th>
+          <th>IC 95% (A)</th>
           <th>Resultado</th>
         </tr>
       </thead>
@@ -126,11 +141,10 @@
 </section>
 
 <footer>
-  Datos: ONPE · Proyección estadística sin carácter oficial ·
-  <span id="footer-ts"></span>
+  Datos: ONPE · Proyección estadística sin carácter oficial · <span id="footer-ts"></span>
 </footer>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

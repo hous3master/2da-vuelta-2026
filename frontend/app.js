@@ -35,7 +35,7 @@
    ══════════════════════════════════════════════════════════════ */
 
 const Z   = 1.96;
-const CSV = '/resultados_onpe_progresivo.csv';
+const CSV = './resultados_onpe_progresivo.csv';
 
 const fmt    = n => n == null ? '–' : Number(n).toLocaleString('es-PE');
 const fmtPct = p => p == null ? '–' : (+p).toFixed(3) + '%';

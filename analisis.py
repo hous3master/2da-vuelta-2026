@@ -191,6 +191,14 @@ def analyse(districts, cand_a, cand_b):
     cov_pct = total_n / total_N * 100 if total_N else 0
     latest_ts = max(d["ts"] for d in districts)
 
+    # actual counted votes (non-imputed districts only)
+    real = [d for d in districts if not d["imputed"]]
+    real_vA    = sum(d["vA"]          for d in real)
+    real_vB    = sum(d["vB"]          for d in real)
+    real_total = sum(d["total_valid"] for d in real)
+    real_pA    = real_vA / real_total if real_total else 0
+    real_pB    = real_vB / real_total if real_total else 0
+
     return dict(
         cand_a=cand_a, cand_b=cand_b,
         pA=pA, pB=pB,
@@ -201,6 +209,8 @@ def analyse(districts, cand_a, cand_b):
         SE_final=SE_final, z_stat=z_stat, p_value=p_value, sig=sig,
         total_N=total_N, total_n=total_n, cov_pct=cov_pct,
         n_districts=len(districts), latest_ts=latest_ts,
+        real_vA=real_vA, real_vB=real_vB, real_total=real_total,
+        real_pA=real_pA, real_pB=real_pB,
     )
 
 def print_report(r):
@@ -222,21 +232,28 @@ def print_report(r):
 
     print(f"\n  Cobertura: {r['total_n']:,} / {r['total_N']:,} actas "
           f"({r['cov_pct']:.1f}%)  ·  {r['n_districts']:,} distritos")
+    print(f"  Votos válidos contados: {r['real_total']:,}"
+          f"   (col. de {int(r['total_V']):,} proyectados)")
 
     print()
-    print(f"  {'CANDIDATO':<46}  {'%':>8}  {'IC 95%'}")
-    print(f"  {'-'*66}")
+    print(f"  {'CANDIDATO':<42}  {'CONTADOS':>12}  {'PROYECTADOS':>13}")
+    print(f"  {'-'*70}")
 
-    def cand_line(name, p, lo, hi, votes):
+    def cand_line(name, p_real, v_real, p_proj, lo, hi, v_proj):
         short = " ".join(name.split()[:3])
-        bar_s = bar(p)
-        return (f"  {short:<46}  {p*100:>7.3f}%\n"
-                f"    {bar_s}\n"
-                f"    IC 95%: [{pct(lo)} – {pct(hi)}]   ~{int(votes):,} votos proyectados")
+        bar_s = bar(p_proj)
+        return (
+            f"  {short:<42}  {v_real:>11,}  {v_proj:>12,.0f}\n"
+            f"    {bar_s}\n"
+            f"    Contados: {p_real*100:.3f}%   Proyectado: {p_proj*100:.3f}%\n"
+            f"    IC 95%: [{pct(lo)} – {pct(hi)}]"
+        )
 
-    print(cand_line(r["cand_a"], r["pA"], r["ciLoA"], r["ciHiA"], r["total_A"]))
+    print(cand_line(r["cand_a"], r["real_pA"], r["real_vA"],
+                    r["pA"], r["ciLoA"], r["ciHiA"], r["total_A"]))
     print()
-    print(cand_line(r["cand_b"], r["pB"], r["ciLoB"], r["ciHiB"], r["total_B"]))
+    print(cand_line(r["cand_b"], r["real_pB"], r["real_vB"],
+                    r["pB"], r["ciLoB"], r["ciHiB"], r["total_B"]))
 
     print()
     print(f"  {'─'*66}")
